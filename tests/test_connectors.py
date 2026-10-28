@@ -29,7 +29,7 @@ def server_mock() -> mock.Mock:
 def test_loader_is_lazy_and_returns_fresh_connectors(tmp_path) -> None:
     names = connector_names()
     assert names == ["bauplan", "chronos", "dolt", "dolt_mysql", "file_copy", "matrixone",
-                     "neon", "seekdb", "terminusdb", "xata"]
+                     "neon", "prolly", "seekdb", "terminusdb", "xata"]
     with mock.patch("dblib.connector.importlib.import_module") as imported:
         assert connector_names() == names
         imported.assert_not_called()
@@ -105,7 +105,7 @@ def test_cleanup_covers_load_and_execution_failure(failure, tmp_path) -> None:
     server.delete.assert_not_called()
 
 
-@pytest.mark.parametrize("name", ["dolt", "dolt_mysql", "seekdb", "matrixone", "file_copy", "chronos"])
+@pytest.mark.parametrize("name", ["dolt", "dolt_mysql", "prolly", "seekdb", "matrixone", "file_copy", "chronos"])
 def test_duplicate_create_after_collision_check_never_deletes_the_winner(name, tmp_path) -> None:
     server = load_connector(name, state_dir=tmp_path)
     module = __import__(f"dblib.connectors.{name}", fromlist=[name])
@@ -118,7 +118,7 @@ def test_duplicate_create_after_collision_check_never_deletes_the_winner(name, t
         stack.enter_context(mock.patch.object(server, "exists", return_value=False))
         delete = stack.enter_context(mock.patch.object(
             server, "delete", side_effect=lambda db: winner.update(present=False)))
-        if name in ("dolt", "file_copy", "chronos"):
+        if name in ("dolt", "prolly", "file_copy", "chronos"):
             stack.enter_context(mock.patch.object(server, "_admin", return_value=conn))
         else:
             stack.enter_context(mock.patch.object(getattr(module, name), "connect", return_value=conn))
@@ -415,3 +415,31 @@ def test_dolt_cleanup_removes_dropped_database_trash(name, tmp_path) -> None:
         server.delete("bb_test")
         assert not trash.exists()
         assert not server.exists("bb_test")
+
+
+def test_prolly_provision_makes_a_versioned_database_and_delete_forces_the_drop() -> None:
+    from dblib.connectors import prolly as prolly_connector
+    server = load_connector("prolly")
+    conn = mock.MagicMock()
+    cursor = conn.cursor.return_value.__enter__.return_value
+    with mock.patch.object(server, "_admin", return_value=conn), \
+            mock.patch.object(prolly_connector.prolly, "prepare_database") as prepare:
+        assert server.provision("bb_test") == DatabaseHandle("bb_test", "main")
+        cursor.execute.assert_called_with("CREATE DATABASE bb_test")
+        prepare.assert_called_once()
+        assert prepare.call_args.args[1] == "bb_test"
+        cursor.fetchone.return_value = None
+        server.delete("bb_test")
+        assert mock.call("DROP DATABASE IF EXISTS bb_test WITH (FORCE)") in cursor.execute.call_args_list
+
+
+def test_prolly_failed_preparation_removes_the_created_database() -> None:
+    from dblib.connectors import prolly as prolly_connector
+    server = load_connector("prolly")
+    with mock.patch.object(server, "_admin", return_value=mock.MagicMock()), \
+            mock.patch.object(prolly_connector.prolly, "prepare_database",
+                              side_effect=RuntimeError("no VERSIONED schemas")), \
+            mock.patch.object(server, "delete") as delete:
+        with pytest.raises(RuntimeError, match="VERSIONED"):
+            server.provision("bb_test")
+        delete.assert_called_once_with("bb_test")

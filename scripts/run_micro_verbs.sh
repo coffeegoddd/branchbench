@@ -6,7 +6,7 @@
 #   ./scripts/run_micro_verbs.sh [--outroot DIR] [--scales 1,2,4,8] [--reps N] [--warmup N] \
 #       [--verbs a,b,...] [--axes a,b,...] [--native-only] [--parallel] [backend ...]
 #
-#   backend ...   subset of: dolt dolt_mysql seekdb matrixone file_copy chronos neon
+#   backend ...   subset of: dolt dolt_mysql prolly seekdb matrixone file_copy chronos neon
 #                 (default: all seven)
 #   --scales      data sizes, one run each (default 1,2,4,8; the base size 1
 #                 runs every point, the others only the data-size points)
